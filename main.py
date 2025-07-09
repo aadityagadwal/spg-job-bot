@@ -90,9 +90,13 @@ def fetch_jobs():
             response = requests.post(url, json={"limit": 50, "offset": 0})
             response.raise_for_status()
             jobs = response.json().get("jobPostings", [])
+            print(f"📦 {company}: {len(jobs)} total jobs fetched from API")
         except Exception as e:
             print(f"⚠️ Failed to fetch jobs from {company}: {e}")
             continue
+
+        if not jobs:
+            print(f"❌ No jobs returned from {company}'s API.")
 
         for job in jobs:
             title = job.get("title", "").lower()
@@ -116,8 +120,11 @@ def fetch_jobs():
                 else:
                     current_jobs.append(job_obj)
 
+    print(f"🆕 New Matching Jobs: {len(new_jobs)}")
+    print(f"📋 Already Seen Matching Jobs: {len(current_jobs)}")
     save_seen_jobs(new_ids)
     return new_jobs, current_jobs
+
 
 def group_jobs_by_company(jobs):
     grouped = {}

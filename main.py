@@ -10,7 +10,7 @@ from email.mime.multipart import MIMEMultipart
 # Setup
 KEYWORDS = ['data', 'engineer', 'apprentice', 'software', 'development', 'data analyst', 'python', 'full stack']
 LOCATION_FILTER = 'mumbai, maharashtra'
-URL = "https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers/jobs"
+URL = "https://spgi.wd5.myworkdayjobs.com/en-US/SPGI_Careers?Location_Region_State_Province=4c1516307304017f29da409c56637fa6"
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_RECEIVER = 'aadityagadwal11@gmail.com'

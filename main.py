@@ -8,8 +8,11 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # 🧠 Filters
-KEYWORDS = ['data', 'engineer', 'apprentice', 'software', 'development', 'data analyst', 'python', 'full stack','data scientist','intern']
-LOCATION_FILTER = 'mumbai'
+KEYWORDS = [
+    'data', 'engineer', 'apprentice', 'software', 'development',
+    'data analyst', 'python', 'full stack', 'data scientist', 'intern'
+]
+LOCATION_FILTER = 'mumbai, maharashtra'
 
 # 📬 Email config
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
@@ -43,7 +46,7 @@ def send_email(subject, body):
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
     try:
-        server = smtpllib.SMTP('smtp.gmail.com', 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
@@ -110,11 +113,20 @@ def fetch_jobs():
         save_seen_jobs(new_ids)
     return all_new_jobs
 
-# 🚀 Main
+# 🚀 Main logic
 def main():
     jobs = fetch_jobs()
     if jobs:
-        body = "\n\n".join([f"Company: {j['company']}\nTitle: {j['title']}\nLocation: {j['location']}\nLink: {j['url']}" for j in jobs])
+        # ✅ Prioritize S&P Global jobs first
+        spg_jobs = [j for j in jobs if j['company'] == 'S&P Global']
+        other_jobs = [j for j in jobs if j['company'] != 'S&P Global']
+        sorted_jobs = spg_jobs + other_jobs
+
+        body = "\n\n".join([
+            f"Company: {j['company']}\nTitle: {j['title']}\nLocation: {j['location']}\nLink: {j['url']}"
+            for j in sorted_jobs
+        ])
+
         send_email("🧠 New Job Alerts from Top Companies", body)
         log_to_sheet(jobs)
     else:

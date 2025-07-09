@@ -1,193 +1,204 @@
 import requests
-import smtplib
 import json
-import os
-import gspread
+import time
 from datetime import datetime
-from oauth2client.service_account import ServiceAccountCredentials
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
-# 🧠 Filters
-KEYWORDS = [
-    'data', 'engineer', 'apprentice', 'software', 'development',
-    'data analyst', 'python', 'full stack', 'data scientist', 'intern', 'data engineer'
-]
-LOCATION_FILTER = 'mumbai, maharashtra'
-WEEKLY_DIGEST = False  # ⬅️ Set True for Monday-only emails
-
-# 📬 Email config
-EMAIL_SENDER = os.getenv('EMAIL_SENDER')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-EMAIL_RECEIVER = 'aadityagadwal11@gmail.com'
-
-# 📊 Google Sheet
-SHEET_ID = os.getenv('SHEET_ID')
-CACHE_FILE = 'job_ids.json'
-GOOGLE_CREDS_FILE = 'sgpjobtracker-465403-99d56dd31314.json'
-
-# 🔗 Workday Job APIs (10 Companies)
+# Test configuration
 COMPANY_SOURCES = {
-    "S&P Global": "https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers/jobs",
-    "KPMG India": "https://kpmg.wd1.myworkdayjobs.com/wday/cxs/kpmgcareers/KPMG_Careers/jobs",
-    "Capgemini India": "https://capgemini.wd3.myworkdayjobs.com/wday/cxs/capgemini/Capgemini_India/jobs",
-    "Nasdaq": "https://nasdaq.wd1.myworkdayjobs.com/wday/cxs/nasdaqcareers/NasdaqCareers/jobs",
-    "PwC": "https://pwc.wd3.myworkdayjobs.com/wday/cxs/pwc/External_Careers/jobs",
-    "Genpact": "https://genpact.wd1.myworkdayjobs.com/wday/cxs/genpactcareers/Genpact_Careers/jobs",
-    "DXC Technology": "https://dxc.wd1.myworkdayjobs.com/wday/cxs/dxctechnology/External_Careers/jobs",
-    "McKinsey & Co": "https://mckinsey.wd1.myworkdayjobs.com/wday/cxs/mckinseycareers/McKinseyCareers/jobs",
-    "HP": "https://hp.wd5.myworkdayjobs.com/wday/cxs/hpcareers/HP/jobs",
-    "Cognizant": "https://cognizant.wd5.myworkdayjobs.com/wday/cxs/cognizantcareers/CognizantCareers/jobs"
+    "S&P Global": {
+        "url": "https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers/jobs",
+        "base_url": "https://spgi.wd5.myworkdayjobs.com/SPGI_Careers"
+    },
+    "KPMG India": {
+        "url": "https://kpmg.wd1.myworkdayjobs.com/wday/cxs/kpmgcareers/KPMG_Careers/jobs",
+        "base_url": "https://kpmg.wd1.myworkdayjobs.com/KPMG_Careers"
+    },
+    "Capgemini India": {
+        "url": "https://capgemini.wd3.myworkdayjobs.com/wday/cxs/capgemini/Capgemini_India/jobs",
+        "base_url": "https://capgemini.wd3.myworkdayjobs.com/Capgemini_India"
+    },
+    "Nasdaq": {
+        "url": "https://nasdaq.wd1.myworkdayjobs.com/wday/cxs/nasdaqcareers/NasdaqCareers/jobs",
+        "base_url": "https://nasdaq.wd1.myworkdayjobs.com/NasdaqCareers"
+    },
+    "PwC": {
+        "url": "https://pwc.wd3.myworkdayjobs.com/wday/cxs/pwc/External_Careers/jobs",
+        "base_url": "https://pwc.wd3.myworkdayjobs.com/External_Careers"
+    }
 }
 
-def send_email(subject, html_body):
-    msg = MIMEMultipart("alternative")
-    msg['From'] = EMAIL_SENDER
-    msg['To'] = EMAIL_RECEIVER
-    msg['Subject'] = subject
-    msg.attach(MIMEText(html_body, 'html'))
+def get_headers():
+    """Return proper headers for Workday API requests"""
+    return {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    }
 
+def test_api_endpoint(company, company_data):
+    """Test a single API endpoint"""
+    print(f"\n{'='*50}")
+    print(f"🧪 Testing: {company}")
+    print(f"URL: {company_data['url']}")
+    print(f"{'='*50}")
+    
+    headers = get_headers()
+    payload = {
+        "appliedFacets": {},
+        "limit": 5,  # Small limit for testing
+        "offset": 0,
+        "searchText": ""
+    }
+    
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print("✅ Email sent")
+        start_time = time.time()
+        response = requests.post(
+            company_data['url'], 
+            json=payload, 
+            headers=headers, 
+            timeout=15
+        )
+        response_time = time.time() - start_time
+        
+        print(f"⏱️ Response time: {response_time:.2f}s")
+        print(f"📊 Status code: {response.status_code}")
+        print(f"📏 Response size: {len(response.content)} bytes")
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                jobs = data.get("jobPostings", [])
+                print(f"✅ SUCCESS: {len(jobs)} jobs found")
+                
+                # Show sample job data
+                if jobs:
+                    sample_job = jobs[0]
+                    print(f"📋 Sample job:")
+                    print(f"   Title: {sample_job.get('title', 'N/A')}")
+                    print(f"   Location: {sample_job.get('locationsText', 'N/A')}")
+                    print(f"   Posted: {sample_job.get('postedOn', {}).get('value', 'N/A')}")
+                    print(f"   ID: {sample_job.get('externalPath', 'N/A')}")
+                
+                return True, len(jobs)
+                
+            except json.JSONDecodeError:
+                print("❌ FAILED: Invalid JSON response")
+                print(f"Response preview: {response.text[:200]}...")
+                return False, 0
+                
+        else:
+            print(f"❌ FAILED: HTTP {response.status_code}")
+            print(f"Response preview: {response.text[:200]}...")
+            return False, 0
+            
+    except requests.exceptions.Timeout:
+        print("❌ FAILED: Request timeout")
+        return False, 0
+    except requests.exceptions.ConnectionError:
+        print("❌ FAILED: Connection error")
+        return False, 0
+    except requests.exceptions.RequestException as e:
+        print(f"❌ FAILED: Request error - {e}")
+        return False, 0
     except Exception as e:
-        print(f"❌ Email failed: {e}")
+        print(f"❌ FAILED: Unexpected error - {e}")
+        return False, 0
 
-def load_seen_jobs():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, 'r') as f:
-            return json.load(f)
-    return []
-
-def save_seen_jobs(ids):
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(ids, f)
-
-def log_to_sheet(jobs):
-    try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDS_FILE, scope)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(SHEET_ID).sheet1
-        for job in jobs:
-            sheet.append_row([job['company'], job['title'], job['location'], job['url']])
-        print("📄 Logged to Google Sheets")
-    except Exception as e:
-        print(f"⚠️ Google Sheet error: {e}")
-
-def fetch_jobs():
-    seen = load_seen_jobs()
-    new_ids = seen.copy()
-    new_jobs = []
-    current_jobs = []
-
-    for company, url in COMPANY_SOURCES.items():
+def test_alternative_endpoints():
+    """Test alternative API patterns"""
+    print(f"\n{'='*50}")
+    print("🔄 Testing Alternative API Patterns")
+    print(f"{'='*50}")
+    
+    # Try different API patterns that might work
+    alternatives = [
+        {
+            "name": "S&P Global (Alternative 1)",
+            "url": "https://spgi.wd5.myworkdayjobs.com/SPGI_Careers",
+            "method": "GET"
+        },
+        {
+            "name": "S&P Global (Alternative 2)", 
+            "url": "https://spgi.wd5.myworkdayjobs.com/wday/cxs/spgi/SPGI_Careers",
+            "method": "GET"
+        }
+    ]
+    
+    for alt in alternatives:
+        print(f"\n🔍 Testing {alt['name']}")
         try:
-            response = requests.post(url, json={"limit": 50, "offset": 0})
-            response.raise_for_status()
-            jobs = response.json().get("jobPostings", [])
-            print(f"📦 {company}: {len(jobs)} total jobs fetched from API")
+            if alt['method'] == 'GET':
+                response = requests.get(alt['url'], timeout=10)
+            else:
+                response = requests.post(alt['url'], json={}, timeout=10)
+                
+            print(f"Status: {response.status_code}")
+            if response.status_code == 200:
+                print(f"✅ GET request successful")
+            else:
+                print(f"❌ Failed with status {response.status_code}")
+                
         except Exception as e:
-            print(f"⚠️ Failed to fetch jobs from {company}: {e}")
-            continue
-
-        if not jobs:
-            print(f"❌ No jobs returned from {company}'s API.")
-
-        for job in jobs:
-            title = job.get("title", "").lower()
-            location = job.get("locationsText", "").lower()
-            job_id = job.get("externalPath", "")
-            posted_date = job.get("startDate", {}).get("value", "N/A")
-
-            if any(k in title for k in KEYWORDS) and LOCATION_FILTER in location:
-                job_link = f"{url.split('/wday')[0]}/en-US/{'/'.join(job_id.strip('/').split('/')[-2:])}"
-                job_obj = {
-                    "company": company,
-                    "title": job.get("title"),
-                    "location": location.title(),
-                    "url": job_link,
-                    "posted": posted_date
-                }
-
-                if job_id not in seen:
-                    new_jobs.append(job_obj)
-                    new_ids.append(job_id)
-                else:
-                    current_jobs.append(job_obj)
-
-    print(f"🆕 New Matching Jobs: {len(new_jobs)}")
-    print(f"📋 Already Seen Matching Jobs: {len(current_jobs)}")
-    save_seen_jobs(new_ids)
-    return new_jobs, current_jobs
-
-
-def group_jobs_by_company(jobs):
-    grouped = {}
-    for job in jobs:
-        grouped.setdefault(job['company'], []).append(job)
-    return dict(sorted(grouped.items(), key=lambda x: (x[0] != "S&P Global", x[0])))
-
-def format_summary_table(new_grouped, current_grouped):
-    all_companies = set(new_grouped) | set(current_grouped)
-    rows = []
-    for company in sorted(all_companies):
-        new_count = len(new_grouped.get(company, []))
-        seen_count = len(current_grouped.get(company, []))
-        rows.append(f"<tr><td>{company}</td><td>{new_count}</td><td>{seen_count}</td></tr>")
-    return f"""
-    <h2>📊 Summary</h2>
-    <table border="1" cellpadding="6" cellspacing="0">
-        <tr><th>Company</th><th>New Jobs</th><th>Seen</th></tr>
-        {''.join(rows)}
-    </table><br>
-    """
-
-def format_html_section(title, jobs_grouped):
-    if not jobs_grouped:
-        return ""
-    html = f"<h2>{title}</h2>"
-    for company, jobs in jobs_grouped.items():
-        html += f"<h3>🏢 <b>{company}</b></h3><ul>"
-        for job in jobs:
-            html += f"<li><b>{job['title']}</b> – {job['location']} – <i>Posted: {job['posted']}</i><br><a href='{job['url']}'>Apply</a></li>"
-        html += "</ul><br>"
-    return html
+            print(f"❌ Error: {e}")
 
 def main():
-    if WEEKLY_DIGEST:
-        now = datetime.utcnow()
-        india_hour = (now.hour + 5) % 24
-        if not (now.weekday() == 0 and india_hour == 10):
-            print("⏱ Skipping — not Monday 10AM IST")
-            return
-
-    new_jobs, current_jobs = fetch_jobs()
-    grouped_new = group_jobs_by_company(new_jobs)
-    grouped_current = group_jobs_by_company(current_jobs)
-
-    if grouped_new or grouped_current:
-        html_body = "<html><body style='font-family: Arial;'>"
-        html_body += "<h1>💼 Job Monitor: Top Roles for You</h1>"
-        html_body += format_summary_table(grouped_new, grouped_current)
-        html_body += format_html_section("🆕 New Matching Jobs", grouped_new)
-        html_body += format_html_section("📋 Current Listings (Already Seen)", grouped_current)
-        html_body += "<p><i>🧠 Powered by your job alert bot</i></p></body></html>"
-
-        send_email("📡 Job Alert Summary", html_body)
-
-        if new_jobs:
-            log_to_sheet(new_jobs)
+    """Main testing function"""
+    print("🚀 Starting Workday API Endpoint Tests")
+    print(f"🕐 Test started at: {datetime.now()}")
+    
+    results = {}
+    total_jobs = 0
+    
+    # Test each company endpoint
+    for company, company_data in COMPANY_SOURCES.items():
+        success, job_count = test_api_endpoint(company, company_data)
+        results[company] = {
+            'success': success,
+            'job_count': job_count
+        }
+        total_jobs += job_count
+        time.sleep(2)  # Rate limiting
+    
+    # Test alternatives
+    test_alternative_endpoints()
+    
+    # Summary
+    print(f"\n{'='*50}")
+    print("📊 TEST SUMMARY")
+    print(f"{'='*50}")
+    
+    successful = sum(1 for r in results.values() if r['success'])
+    total_companies = len(results)
+    
+    print(f"✅ Successful APIs: {successful}/{total_companies}")
+    print(f"📋 Total jobs found: {total_jobs}")
+    print(f"🕐 Test completed at: {datetime.now()}")
+    
+    print(f"\n📋 Detailed Results:")
+    for company, result in results.items():
+        status = "✅ WORKING" if result['success'] else "❌ FAILED"
+        job_count = f"({result['job_count']} jobs)" if result['success'] else ""
+        print(f"  {company}: {status} {job_count}")
+    
+    # Recommendations
+    print(f"\n💡 Recommendations:")
+    if successful > 0:
+        print("✅ Some APIs are working! Your job scraper should find jobs.")
     else:
-        send_email(
-            "✅ Job Bot Check-In: No New Jobs",
-            "<p>The job bot ran fine but no new or matching jobs were found this time. ✅</p>"
-        )
-        print("ℹ️ No jobs matched.")
+        print("❌ No APIs are working. Consider alternative approaches:")
+        print("   - Try web scraping the public job pages")
+        print("   - Use job aggregator APIs (LinkedIn, Indeed)")
+        print("   - Check if companies have RSS feeds")
+    
+    print(f"\n🏁 Test completed!")
 
 if __name__ == "__main__":
     main()

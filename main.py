@@ -78,6 +78,59 @@ COMPANY_SOURCES = {
     }
 }
 
+# 📊 Scraping Status Tracking
+class ScrapingStatus:
+    def __init__(self):
+        self.status = {}
+        self.reset_all()
+    
+    def reset_all(self):
+        """Reset all company statuses"""
+        for company in COMPANY_SOURCES.keys():
+            self.status[company] = {
+                'status': 'pending',
+                'jobs_found': 0,
+                'error_message': None,
+                'response_time': None,
+                'last_updated': None
+            }
+    
+    def set_success(self, company, jobs_count, response_time=None):
+        """Mark company as successfully scraped"""
+        self.status[company].update({
+            'status': 'success',
+            'jobs_found': jobs_count,
+            'error_message': None,
+            'response_time': response_time,
+            'last_updated': datetime.now().strftime('%H:%M:%S')
+        })
+    
+    def set_failure(self, company, error_message, response_time=None):
+        """Mark company as failed to scrape"""
+        self.status[company].update({
+            'status': 'failed',
+            'jobs_found': 0,
+            'error_message': str(error_message)[:100],  # Truncate long error messages
+            'response_time': response_time,
+            'last_updated': datetime.now().strftime('%H:%M:%S')
+        })
+    
+    def get_summary(self):
+        """Get summary of scraping results"""
+        success_count = sum(1 for s in self.status.values() if s['status'] == 'success')
+        failed_count = sum(1 for s in self.status.values() if s['status'] == 'failed')
+        total_jobs = sum(s['jobs_found'] for s in self.status.values())
+        
+        return {
+            'total_companies': len(self.status),
+            'successful': success_count,
+            'failed': failed_count,
+            'total_jobs_found': total_jobs
+        }
+
+# Global scraping status tracker
+scraping_status = ScrapingStatus()
+
 def debug_print(message):
     """Print debug messages only if DEBUG_MODE is enabled"""
     if DEBUG_MODE:
@@ -300,9 +353,10 @@ def process_job(job, company, company_data):
         return None
 
 def fetch_jobs_from_company(company, company_data):
-    """Fetch jobs from a single company with improved error handling"""
+    """Fetch jobs from a single company with improved error handling and status tracking"""
     url = company_data['url']
     headers = get_headers()
+    start_time = time.time()
     
     # Try different payload structures
     payloads = [
@@ -323,6 +377,9 @@ def fetch_jobs_from_company(company, company_data):
         }
     ]
     
+    last_error = None
+    response = None
+    
     for i, payload in enumerate(payloads):
         try:
             # Add random delay to avoid rate limiting
@@ -336,14 +393,20 @@ def fetch_jobs_from_company(company, company_data):
                 debug_print(f"✅ Success with payload {i+1}")
                 break
             else:
+                last_error = f"HTTP {response.status_code}"
                 debug_print(f"❌ Payload {i+1} failed with status {response.status_code}")
                 continue
                 
         except Exception as e:
+            last_error = str(e)
             debug_print(f"❌ Payload {i+1} failed with error: {e}")
             continue
     else:
-        print(f"❌ All payloads failed for {company}")
+        # All payloads failed
+        response_time = round(time.time() - start_time, 2)
+        error_msg = f"All payloads failed. Last error: {last_error}"
+        scraping_status.set_failure(company, error_msg, response_time)
+        print(f"❌ All payloads failed for {company}: {last_error}")
         return []
     
     try:
@@ -358,21 +421,31 @@ def fetch_jobs_from_company(company, company_data):
         debug_print(f"  Response keys: {list(data.keys())}")
         debug_print(f"  Jobs found: {len(jobs)}")
         
+        response_time = round(time.time() - start_time, 2)
+        
         if not jobs:
             debug_print(f"  ⚠️ No jobs found. Sample response: {str(data)[:300]}...")
+            scraping_status.set_success(company, 0, response_time)
             return []
         
         # Show first job structure for debugging
         if jobs and DEBUG_MODE:
             debug_print(f"  🔍 First job structure: {list(jobs[0].keys())}")
-            
+        
+        scraping_status.set_success(company, len(jobs), response_time)
         print(f"📦 {company}: {len(jobs)} jobs fetched")
         return jobs
         
     except json.JSONDecodeError:
+        response_time = round(time.time() - start_time, 2)
+        error_msg = "Invalid JSON response"
+        scraping_status.set_failure(company, error_msg, response_time)
         print(f"❌ Invalid JSON response from {company}")
         return []
     except Exception as e:
+        response_time = round(time.time() - start_time, 2)
+        error_msg = f"Unexpected error: {str(e)}"
+        scraping_status.set_failure(company, error_msg, response_time)
         print(f"❌ Unexpected error processing response from {company}: {e}")
         return []
 
@@ -382,6 +455,9 @@ def fetch_jobs():
     new_ids = seen.copy()
     new_jobs = []
     current_jobs = []
+    
+    # Reset scraping status for new run
+    scraping_status.reset_all()
     
     print(f"🔍 Starting job search with {len(seen)} previously seen jobs")
     
@@ -417,6 +493,13 @@ def fetch_jobs():
     print(f"🆕 New Matching Jobs: {len(new_jobs)}")
     print(f"📋 Previously Seen Matching Jobs: {len(current_jobs)}")
     
+    # Print scraping summary
+    summary = scraping_status.get_summary()
+    print(f"🌐 Scraping Summary:")
+    print(f"  ✅ Successful: {summary['successful']}/{summary['total_companies']}")
+    print(f"  ❌ Failed: {summary['failed']}/{summary['total_companies']}")
+    print(f"  📊 Total Jobs Found: {summary['total_jobs_found']}")
+    
     save_seen_jobs(new_ids)
     return new_jobs, current_jobs
 
@@ -426,6 +509,56 @@ def group_jobs_by_company(jobs):
     for job in jobs:
         grouped.setdefault(job['company'], []).append(job)
     return dict(sorted(grouped.items(), key=lambda x: (x[0] != "S&P Global", x[0])))
+
+def format_scraping_status_table():
+    """Format scraping status table for email"""
+    summary = scraping_status.get_summary()
+    
+    html = f"""
+    <h2>🌐 Scraping Status Report</h2>
+    <div style="margin-bottom: 15px;">
+        <strong>Overall Status:</strong> {summary['successful']}/{summary['total_companies']} companies successful | 
+        {summary['failed']} failed | {summary['total_jobs_found']} total jobs found
+    </div>
+    <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; font-size: 14px;">
+        <tr style="background-color: #2196F3; color: white;">
+            <th>Company</th>
+            <th>Status</th>
+            <th>Jobs Found</th>
+            <th>Response Time</th>
+            <th>Last Updated</th>
+            <th>Error Details</th>
+        </tr>
+    """
+    
+    for company, status in scraping_status.status.items():
+        # Determine row color based on status
+        if status['status'] == 'success':
+            row_color = '#E8F5E8'  # Light green
+            status_icon = '✅'
+        elif status['status'] == 'failed':
+            row_color = '#FFE8E8'  # Light red
+            status_icon = '❌'
+        else:
+            row_color = '#FFF8E1'  # Light yellow
+            status_icon = '⏳'
+        
+        response_time = f"{status['response_time']}s" if status['response_time'] else "N/A"
+        error_msg = status['error_message'] if status['error_message'] else "None"
+        
+        html += f"""
+        <tr style="background-color: {row_color};">
+            <td><strong>{company}</strong></td>
+            <td>{status_icon} {status['status'].title()}</td>
+            <td>{status['jobs_found']}</td>
+            <td>{response_time}</td>
+            <td>{status['last_updated'] or 'N/A'}</td>
+            <td style="font-size: 12px; max-width: 200px; word-wrap: break-word;">{error_msg}</td>
+        </tr>
+        """
+    
+    html += "</table><br>"
+    return html
 
 def format_summary_table(new_grouped, current_grouped):
     """Format summary table for email"""
@@ -484,8 +617,8 @@ def main():
     if EMAIL_SENDER and EMAIL_PASSWORD:
         print("📧 Testing email configuration...")
         test_result = send_email(
-            "🧪 Job Bot Test - Improved Configuration Check", 
-            "<p>✅ Email configuration is working! Job bot will start monitoring with improved filtering now.</p>"
+            "🧪 Job Bot Test - Enhanced with Scraping Status", 
+            "<p>✅ Email configuration is working! Job bot will start monitoring with scraping status tracking now.</p>"
         )
         if not test_result:
             print("❌ Email test failed - check your Gmail app password")
@@ -507,12 +640,15 @@ def main():
     grouped_new = group_jobs_by_company(new_jobs)
     grouped_current = group_jobs_by_company(current_jobs)
     
-    # Send email report - ALWAYS include current jobs
+    # Send email report - ALWAYS include current jobs and scraping status
     html_body = """
     <html>
     <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
-    <h1 style='color: #2E7D32;'>💼 Job Monitor: Your Personalized Job Alert (Improved)</h1>
+    <h1 style='color: #2E7D32;'>💼 Job Monitor: Your Personalized Job Alert (Enhanced)</h1>
     """
+    
+    # Add scraping status table at the top
+    html_body += format_scraping_status_table()
     
     html_body += format_summary_table(grouped_new, grouped_current)
     
@@ -531,28 +667,6 @@ def main():
     html_body += """
     <hr style="margin: 20px 0;">
     <p style="font-size: 12px; color: #666;">
-        <i>🤖 This alert was generated by your improved automated job monitoring system.<br>
+        <i>🤖 This alert was generated by your enhanced automated job monitoring system with scraping status tracking.<br>
         Keywords: data, engineer, software, development, analyst, python, full stack, scientist, intern, developer, ml, ai, devops, cloud<br>
-        Location: Mumbai, Maharashtra, India (flexible matching)</i>
-    </p>
-    </body>
-    </html>
-    """
-    
-    # Send email with appropriate subject
-    if new_jobs:
-        subject = f"📡 Job Alert: {len(new_jobs)} New Jobs Found! (Improved)"
-    else:
-        subject = f"📋 Job Monitor: {len(current_jobs)} Current Jobs Available (Improved)"
-    
-    send_email(subject, html_body)
-    
-    # Log new jobs to Google Sheets
-    if new_jobs:
-        log_to_sheet(new_jobs)
-    
-    print("📧 Email sent with both new and current job listings!")
-    print("🏁 Job Monitor Bot completed successfully!")
-
-if __name__ == "__main__":
-    main()
+        Location: Mumbai, Maharashtra

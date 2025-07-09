@@ -9,14 +9,20 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import time
 import random
+import re
 
-# 🧠 Filters
+# 🧠 Improved Filters
 KEYWORDS = [
-    'data', 'engineer', 'apprentice', 'software', 'development',
-    'data analyst', 'python', 'full stack', 'data scientist', 'intern', 'data engineer'
+    'data', 'engineer', 'apprentice', 'software', 'development', 'developer',
+    'analyst', 'python', 'full stack', 'scientist', 'intern', 'programming',
+    'backend', 'frontend', 'ml', 'machine learning', 'ai', 'artificial intelligence',
+    'devops', 'cloud', 'java', 'javascript', 'react', 'angular', 'node'
 ]
-LOCATION_FILTER = 'mumbai, maharashtra'
+
+# More flexible location matching
+LOCATION_KEYWORDS = ['mumbai', 'maharashtra', 'bombay']  # Multiple variations
 WEEKLY_DIGEST = False  # ⬅️ Set True for Monday-only emails
+DEBUG_MODE = False  # Set True for detailed logging
 
 # 📬 Email config
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
@@ -72,6 +78,11 @@ COMPANY_SOURCES = {
     }
 }
 
+def debug_print(message):
+    """Print debug messages only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        print(message)
+
 def get_headers():
     """Return proper headers for Workday API requests"""
     return {
@@ -86,7 +97,8 @@ def get_headers():
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
         'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
+        'Pragma': 'no-cache',
+        'Referer': 'https://careers.workday.com/'
     }
 
 def send_email(subject, html_body):
@@ -161,87 +173,208 @@ def log_to_sheet(jobs):
 def construct_job_url(company_data, job_id):
     """Construct proper job URL from job ID"""
     base_url = company_data['base_url']
-    # Remove leading slash if present
     job_id = job_id.lstrip('/')
     return f"{base_url}/job/{job_id}"
 
+def matches_keywords(title):
+    """Check if title matches any of our keywords (case-insensitive)"""
+    title_lower = title.lower()
+    matching_keywords = [kw for kw in KEYWORDS if kw in title_lower]
+    return len(matching_keywords) > 0, matching_keywords
+
+def matches_location(location):
+    """Check if location matches our target areas (more flexible)"""
+    location_lower = location.lower()
+    # Remove extra spaces and normalize
+    location_clean = re.sub(r'\s+', ' ', location_lower.strip())
+    
+    # Check for any of our location keywords
+    for loc_keyword in LOCATION_KEYWORDS:
+        if loc_keyword in location_clean:
+            return True
+    
+    # Also check for "india" + any major city indicators
+    if 'india' in location_clean and any(city in location_clean for city in ['mumbai', 'delhi', 'bangalore', 'pune']):
+        return True
+        
+    return False
+
+def get_job_field_safely(job, field_path):
+    """Safely get nested field from job object"""
+    try:
+        current = job
+        for field in field_path:
+            if isinstance(current, dict) and field in current:
+                current = current[field]
+            else:
+                return None
+        return current
+    except:
+        return None
+
+def extract_job_data(job):
+    """Extract job data from various possible response formats"""
+    # Try different possible field names for title
+    title = (job.get("title") or 
+             job.get("jobTitle") or 
+             job.get("name") or 
+             get_job_field_safely(job, ["title", "value"]) or "")
+    
+    # Try different possible field names for location
+    location = (job.get("locationsText") or 
+                job.get("location") or 
+                job.get("locationText") or
+                job.get("primaryLocation") or
+                get_job_field_safely(job, ["location", "name"]) or
+                get_job_field_safely(job, ["primaryLocation", "name"]) or "")
+    
+    # Try different possible field names for job ID
+    job_id = (job.get("externalPath") or 
+              job.get("jobId") or 
+              job.get("id") or 
+              job.get("requisitionId") or "")
+    
+    # Try different possible field names for posted date
+    posted_date = (get_job_field_safely(job, ["postedOn", "value"]) or
+                   get_job_field_safely(job, ["startDate", "value"]) or
+                   job.get("postedDate") or
+                   job.get("datePosted") or "N/A")
+    
+    return {
+        'title': str(title),
+        'location': str(location),
+        'job_id': str(job_id),
+        'posted_date': str(posted_date)
+    }
+
+def process_job(job, company, company_data):
+    """Process a single job posting with improved filtering"""
+    try:
+        # Extract job data using multiple fallback methods
+        job_data = extract_job_data(job)
+        
+        debug_print(f"🔍 Processing job from {company}:")
+        debug_print(f"  Title: '{job_data['title']}'")
+        debug_print(f"  Location: '{job_data['location']}'")
+        debug_print(f"  Job ID: '{job_data['job_id']}'")
+        debug_print(f"  Available fields: {list(job.keys())}")
+        
+        # Skip if essential fields are missing
+        if not job_data['title'] or not job_data['job_id']:
+            debug_print(f"  ❌ Missing essential fields (title or job_id)")
+            return None
+        
+        # Check keyword matching
+        keyword_match, matching_keywords = matches_keywords(job_data['title'])
+        debug_print(f"  Keywords found: {matching_keywords}")
+        
+        if not keyword_match:
+            debug_print(f"  ❌ No keywords matched in title")
+            return None
+        
+        # Check location matching (more flexible)
+        location_match = matches_location(job_data['location'])
+        debug_print(f"  Location matches: {location_match}")
+        debug_print(f"  Raw location: '{job_data['location']}'")
+        
+        # Skip location filter if location data is missing or unclear
+        if job_data['location'] and not location_match:
+            debug_print(f"  ❌ Location doesn't match target areas")
+            return None
+        
+        # Construct proper job URL
+        job_url = construct_job_url(company_data, job_data['job_id'])
+        debug_print(f"  ✅ Job matched! URL: {job_url}")
+        
+        return {
+            "company": company,
+            "title": job_data['title'],
+            "location": job_data['location'].title() if job_data['location'] else "Location not specified",
+            "url": job_url,
+            "posted": job_data['posted_date'],
+            "job_id": job_data['job_id']
+        }
+        
+    except Exception as e:
+        debug_print(f"⚠️ Error processing job: {e}")
+        return None
+
 def fetch_jobs_from_company(company, company_data):
-    """Fetch jobs from a single company with proper error handling"""
+    """Fetch jobs from a single company with improved error handling"""
     url = company_data['url']
     headers = get_headers()
     
-    # Updated payload structure for Workday API
-    payload = {
-        "appliedFacets": {},
-        "limit": 50,
-        "offset": 0,
-        "searchText": ""
-    }
+    # Try different payload structures
+    payloads = [
+        {
+            "appliedFacets": {},
+            "limit": 50,
+            "offset": 0,
+            "searchText": ""
+        },
+        {
+            "appliedFacets": {},
+            "limit": 50,
+            "offset": 0
+        },
+        {
+            "limit": 50,
+            "offset": 0
+        }
+    ]
+    
+    for i, payload in enumerate(payloads):
+        try:
+            # Add random delay to avoid rate limiting
+            time.sleep(random.uniform(2, 5))
+            
+            debug_print(f"📡 Trying payload {i+1} for {company}")
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                debug_print(f"✅ Success with payload {i+1}")
+                break
+            else:
+                debug_print(f"❌ Payload {i+1} failed with status {response.status_code}")
+                continue
+                
+        except Exception as e:
+            debug_print(f"❌ Payload {i+1} failed with error: {e}")
+            continue
+    else:
+        print(f"❌ All payloads failed for {company}")
+        return []
     
     try:
-        # Add random delay to avoid rate limiting
-        time.sleep(random.uniform(1, 3))
+        # Try different possible response structures
+        jobs = (data.get("jobPostings") or 
+                data.get("jobs") or 
+                data.get("data", {}).get("jobPostings") or
+                data.get("data", {}).get("jobs") or [])
         
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        jobs = data.get("jobPostings", [])
+        debug_print(f"📦 {company} API Response:")
+        debug_print(f"  Status: {response.status_code}")
+        debug_print(f"  Response keys: {list(data.keys())}")
+        debug_print(f"  Jobs found: {len(jobs)}")
         
         if not jobs:
-            print(f"⚠️ No jobs returned from {company}")
+            debug_print(f"  ⚠️ No jobs found. Sample response: {str(data)[:300]}...")
             return []
+        
+        # Show first job structure for debugging
+        if jobs and DEBUG_MODE:
+            debug_print(f"  🔍 First job structure: {list(jobs[0].keys())}")
             
         print(f"📦 {company}: {len(jobs)} jobs fetched")
         return jobs
         
-    except requests.exceptions.Timeout:
-        print(f"⏱️ Timeout fetching from {company}")
-        return []
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Request failed for {company}: {e}")
-        return []
     except json.JSONDecodeError:
         print(f"❌ Invalid JSON response from {company}")
         return []
     except Exception as e:
-        print(f"❌ Unexpected error fetching from {company}: {e}")
+        print(f"❌ Unexpected error processing response from {company}: {e}")
         return []
-
-def process_job(job, company, company_data):
-    """Process a single job posting"""
-    try:
-        title = job.get("title", "").lower()
-        location = job.get("locationsText", "").lower()
-        job_id = job.get("externalPath", "")
-        posted_date = job.get("postedOn", {}).get("value", "N/A")
-        
-        # If postedOn is not available, try startDate
-        if posted_date == "N/A":
-            posted_date = job.get("startDate", {}).get("value", "N/A")
-        
-        # Check if job matches our criteria
-        if not any(keyword in title for keyword in KEYWORDS):
-            return None
-            
-        if LOCATION_FILTER not in location:
-            return None
-            
-        # Construct proper job URL
-        job_url = construct_job_url(company_data, job_id)
-        
-        return {
-            "company": company,
-            "title": job.get("title", ""),
-            "location": location.title(),
-            "url": job_url,
-            "posted": posted_date,
-            "job_id": job_id
-        }
-        
-    except Exception as e:
-        print(f"⚠️ Error processing job: {e}")
-        return None
 
 def fetch_jobs():
     """Main function to fetch jobs from all companies"""
@@ -276,6 +409,9 @@ def fetch_jobs():
                 current_jobs.append(processed_job)
         
         print(f"  ✅ {matching_jobs} matching jobs found")
+        
+        # Add delay between companies
+        time.sleep(random.uniform(1, 3))
     
     print(f"\n📊 Summary:")
     print(f"🆕 New Matching Jobs: {len(new_jobs)}")
@@ -342,19 +478,20 @@ def main():
     print(f"📧 Email sender: {'✅ Set' if EMAIL_SENDER else '❌ Missing'}")
     print(f"🔑 Email password: {'✅ Set' if EMAIL_PASSWORD else '❌ Missing'}")
     print(f"📊 Sheet ID: {'✅ Set' if SHEET_ID else '❌ Missing'}")
+    print(f"🐛 Debug mode: {'✅ Enabled' if DEBUG_MODE else '❌ Disabled'}")
     
     # Test email immediately
     if EMAIL_SENDER and EMAIL_PASSWORD:
         print("📧 Testing email configuration...")
         test_result = send_email(
-            "🧪 Job Bot Test - Configuration Check", 
-            "<p>✅ Email configuration is working! Job bot will start monitoring now.</p>"
+            "🧪 Job Bot Test - Improved Configuration Check", 
+            "<p>✅ Email configuration is working! Job bot will start monitoring with improved filtering now.</p>"
         )
         if not test_result:
             print("❌ Email test failed - check your Gmail app password")
             return
     else:
-        print("❌ Email credentials missing - check GitHub secrets")
+        print("❌ Email credentials missing - check environment variables")
         return
     
     # Check for weekly digest mode
@@ -374,7 +511,7 @@ def main():
     html_body = """
     <html>
     <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
-    <h1 style='color: #2E7D32;'>💼 Job Monitor: Your Personalized Job Alert</h1>
+    <h1 style='color: #2E7D32;'>💼 Job Monitor: Your Personalized Job Alert (Improved)</h1>
     """
     
     html_body += format_summary_table(grouped_new, grouped_current)
@@ -394,9 +531,9 @@ def main():
     html_body += """
     <hr style="margin: 20px 0;">
     <p style="font-size: 12px; color: #666;">
-        <i>🤖 This alert was generated by your automated job monitoring system.<br>
-        Keywords: data, engineer, software, development, analyst, python, full stack, scientist, intern<br>
-        Location: Mumbai, Maharashtra</i>
+        <i>🤖 This alert was generated by your improved automated job monitoring system.<br>
+        Keywords: data, engineer, software, development, analyst, python, full stack, scientist, intern, developer, ml, ai, devops, cloud<br>
+        Location: Mumbai, Maharashtra, India (flexible matching)</i>
     </p>
     </body>
     </html>
@@ -404,9 +541,9 @@ def main():
     
     # Send email with appropriate subject
     if new_jobs:
-        subject = f"📡 Job Alert: {len(new_jobs)} New Jobs Found!"
+        subject = f"📡 Job Alert: {len(new_jobs)} New Jobs Found! (Improved)"
     else:
-        subject = f"📋 Job Monitor: {len(current_jobs)} Current Jobs Available"
+        subject = f"📋 Job Monitor: {len(current_jobs)} Current Jobs Available (Improved)"
     
     send_email(subject, html_body)
     
@@ -415,7 +552,6 @@ def main():
         log_to_sheet(new_jobs)
     
     print("📧 Email sent with both new and current job listings!")
-    
     print("🏁 Job Monitor Bot completed successfully!")
 
 if __name__ == "__main__":

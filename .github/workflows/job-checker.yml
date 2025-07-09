@@ -3,7 +3,7 @@ name: S&P Job Monitor
 on:
   schedule:
     - cron: "*/30 * * * *"  # Runs every 30 mins
-  workflow_dispatch:       # Allows manual run from Actions tab
+  workflow_dispatch:
 
 jobs:
   run-job-check:
@@ -18,10 +18,15 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests gspread oauth2client
 
       - name: Run job scraper
         env:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
         run: python3 main.py
+
+
+

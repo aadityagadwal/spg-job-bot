@@ -1,13 +1,12 @@
-# 🤖 SPG Job Bot
+# 🤖 Job Scraper Bot
 
-A fully automated job scraper and notifier that tracks real-time job openings (especially from **S&P Global**) and sends **HTML-formatted email alerts** and optionally **WhatsApp notifications**. Built with Python and scheduled using GitHub Actions.
+A fully automated job scraper and notifier that tracks real-time job openings and sends **HTML-formatted email alerts** and optionally **WhatsApp notifications**. Built with Python and scheduled using GitHub Actions.
 
 ---
 
 ## 🔍 Features
 
 - ✅ Real-time job scraping (every 30 minutes)
-- 🏢 Prioritizes **S&P Global** job listings
 - 📍 Filters based on location (e.g., Mumbai)
 - ✉️ Sends HTML-styled job alerts via Gmail
 - 📲 Optional WhatsApp notifications
